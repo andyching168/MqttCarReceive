@@ -53,7 +53,7 @@
 
 ### 1. 安裝與設定
 
-1.  從 [Releases 頁面](https://github.com/YOUR_USERNAME/YOUR_REPO/releases) 下載最新的 `app-release.apk` 檔案。
+1.  從 [Releases 頁面](https://github.com/andyching168/MqttCarReceive/releases) 下載最新的 `app-release.apk` 檔案。
 2.  將 APK 安裝到您的 Android 車機或設備上。
 3.  **務必手動啟動一次 App** 以“喚醒”它，這是 Android 系統的標準要求，否則開機自啟可能不會生效。
 4.  點選 **"Settings"** 按鈕，填入您的 MQTT Broker 連線資訊。
@@ -81,7 +81,7 @@
 
 1.  **安裝 Magisk:** 確保您的設備已經透過 Magisk 取得 Root 權限。
 2.  **下載 Magisk 模組:**
-    *   從[Releases 頁面](https://github.com/YOUR_USERNAME/YOUR_REPO/releases)中下載MqttCarActionSystemizer.zip
+    *   從[Releases 頁面](https://github.com/andyching168/MqttCarReceive/releases)中下載MqttCarActionSystemizer.zip
 3.  **安裝模組:**
     *   在 Magisk Manager 中，選擇“從本機安裝”。
     *   選擇 ZIP 檔案並刷入。
