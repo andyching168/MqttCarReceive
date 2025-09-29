@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <style name="Theme.MqttCarAction" parent="android:Theme.Material.Light.NoActionBar" />
+    <!-- ↓↓↓ 在这里添加我们自己的透明主题 ↓↓↓ -->
+    <style name="Theme.MqttCarAction.Transparent" parent="Theme.MqttCarAction">
+        <!-- 让窗口背景变成透明 -->
+        <item name="android:windowIsTranslucent">true</item>
+        <!-- 移除窗口背景绘制，进一步确保透明 -->
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <!-- 确保窗口没有阴影或边框 -->
+        <item name="android:windowContentOverlay">@null</item>
+        <!-- 确保窗口不会变暗其他内容 -->
+        <item name="android:backgroundDimEnabled">false</item>
+        <!-- 确保窗口没有标题栏 -->
+        <item name="android:windowNoTitle">true</item>
+        <!-- (可选) 对于对话框式 Activity，这可以防止它全屏 -->
+        <item name="android:windowIsFloating">true</item>
+    </style>
+
+</resources>

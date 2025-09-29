@@ -1,0 +1,122 @@
+plugins {
+    alias(libs.plugins.android.application)
+    alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.serialization) // 使用 alias
+    alias(libs.plugins.hilt) // <-- 在这里应用 hilt
+    alias(libs.plugins.ksp)  // <-- 在这里应用 ksp
+}
+
+android {
+    namespace 'com.andyching168.mqttcaraction'
+    compileSdk 34
+    composeOptions {
+        // 這個版本號需要和你的 Kotlin 版本嚴格對應
+        kotlinCompilerExtensionVersion = libs.versions.composeCompiler.get()
+    }
+    defaultConfig {
+        applicationId "com.andyching168.mqttcaraction"
+        minSdk 26
+        targetSdk 34
+        versionCode 1
+        versionName "1.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    kotlinOptions {
+        jvmTarget = '1.8'
+        freeCompilerArgs += "-Xopt-in=kotlinx.serialization.InternalSerializationApi"
+    }
+    buildFeatures {
+        compose true
+    }
+    packagingOptions {
+        resources {
+            excludes += '/META-INF/{AL2.0,LGPL2.1}'
+            // 排除所有与 netty 相关的重复文件
+            excludes += 'META-INF/INDEX.LIST'
+            excludes += 'META-INF/io.netty.versions.properties'
+        }
+    }
+}
+
+dependencies {
+    implementation libs.hilt.android
+    implementation libs.androidx.appcompat
+    implementation libs.material
+    implementation libs.androidx.activity
+    ksp libs.hilt.compiler    // <-- 添加这一行，将 kapt 替换为 ksp
+    implementation libs.androidx.core.ktx
+    implementation libs.androidx.lifecycle.runtime.ktx
+    implementation libs.androidx.activity.compose
+    implementation libs.androidx.activity.ktx
+    implementation platform(libs.androidx.compose.bom)
+    implementation libs.androidx.compose.ui
+    implementation libs.androidx.compose.ui.graphics
+    implementation libs.androidx.compose.ui.tooling.preview
+    implementation libs.androidx.compose.material3
+    testImplementation libs.junit
+    androidTestImplementation libs.androidx.junit
+    androidTestImplementation libs.androidx.espresso.core
+    androidTestImplementation platform(libs.androidx.compose.bom)
+    androidTestImplementation libs.androidx.compose.ui.test.junit4
+    debugImplementation libs.androidx.compose.ui.tooling
+    debugImplementation libs.androidx.compose.ui.test.manifest
+    // Hilt - 依赖注入
+    implementation libs.androidx.hilt.navigation.compose
+
+    // Coroutines & Flow - 异步处理
+    implementation libs.kotlinx.coroutines.android
+
+    // Lifecycle - 让 Coroutines 感知生命周期
+    implementation libs.androidx.lifecycle.viewmodel.ktx
+    implementation libs.androidx.lifecycle.runtime.compose
+
+    // DataStore - 储存设置
+    implementation libs.androidx.datastore.preferences
+
+    // MQTT Client - Paho
+    //implementation libs.org.eclipse.paho.client.mqttv3
+    // Paho 的 Android Service，用于在后台保持连接
+    //implementation libs.org.eclipse.paho.android.service
+
+    implementation libs.hivemq.mqtt.client // <-- 添加 HiveMQ
+
+    // Kotlinx Serialization - JSON 解析
+    implementation libs.kotlinx.serialization.json
+
+    // Timber - 日志框架 (可选，但强烈推荐)
+    implementation libs.timber
+    implementation libs.androidx.localbroadcastmanager
+
+    implementation libs.slf4j.timber.v31
+    constraints {
+        def activityVersion = libs.versions.activityCompose.get() // 从 toml 获取我们想要的稳定版本 "1.8.2"
+
+        // 为所有相关的 activity 库强制施加版本约束
+        implementation(libs.androidx.activity) {
+            version {
+                strictly(activityVersion)
+            }
+        }
+        implementation(libs.androidx.activity.ktx) {
+            version {
+                strictly(activityVersion)
+            }
+        }
+        implementation(libs.androidx.activity.compose) {
+            version {
+                strictly(activityVersion)
+            }
+        }
+    }
+}

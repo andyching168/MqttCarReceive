@@ -1,0 +1,18 @@
+// Top-level build file (build.gradle)
+// DO NOT ADD PLUGINS HERE. It's now done in libs.versions.toml
+// This file is intentionally left empty. You can add other configurations here if needed.
+// For newer projects, you might not even need this file.
+// Let's make sure plugins are defined in the app-level build.gradle using aliases.
+
+// A better modern approach is to define aliases in settings.gradle.kts or settings.gradle
+// and apply plugins in the module-level build.gradle files.
+// Let's simplify and make sure all plugin definitions are consistent.
+
+// For now, let's make it look like what modern AS templates generate:
+plugins {
+    // We declare the aliases here, the actual version comes from libs.versions.toml
+    alias(libs.plugins.android.application) apply false
+    alias(libs.plugins.kotlin.android) apply false // 它会自动读取 toml 中的版本
+    alias(libs.plugins.hilt) apply false
+    alias(libs.plugins.ksp) apply false  // <-- 新增这一行，同样 apply false
+}
