@@ -7,10 +7,8 @@
 
 **MqttCarAction** 是一款專為 Android 車機（或任何 Android 設備）設計的輕量級、自動化消息處理工具。它透過 MQTT 協定，無縫接收來自您手機或其他裝置的文字或連結，並根據內容自動執行相應操作。本專案旨在為駕駛等場景提供一個“一次設定，永久運作”的無感資訊通道。
 
-這個專案的初衷是為了替代 Tasker 腳本，旨在提供一個更穩定、更可靠且完全開源的解決方案。
-
 <!-- 建議在此處替換成你的 App 截圖 -->
-![App 畫面](https://via.placeholder.com/800x450.png?text=App+UI+截圖)
+![App 畫面](https://github.com/andyching168/MqttCarReceive/blob/master/Screenshot/Receive_Main.png)
 
 ---
 
