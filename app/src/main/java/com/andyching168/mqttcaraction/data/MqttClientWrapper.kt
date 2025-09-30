@@ -6,28 +6,25 @@ import com.hivemq.client.mqtt.MqttClient
 import com.hivemq.client.mqtt.mqtt5.Mqtt5AsyncClient
 import com.hivemq.client.mqtt.mqtt5.message.connect.connack.Mqtt5ConnAck
 import com.hivemq.client.mqtt.mqtt5.message.publish.Mqtt5Publish
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.*
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.future.await
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.Json
 import java.nio.charset.StandardCharsets
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 import javax.inject.Inject
 import javax.inject.Singleton
 
-private val hivemq: Any
-    get() {
-        TODO()
-    }
-
 @Singleton
-class MqttClientWrapper @Inject constructor(private val settingsRepository: SettingsRepository) { // 不再需要 Context
-
+class MqttClientWrapper @Inject constructor(
+    private val settingsRepository: SettingsRepository
+) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val clientMutex = Mutex()
 
     private val _connectionState = MutableStateFlow<MqttConnectionState>(MqttConnectionState.Disconnected(null))
     val connectionState = _connectionState.asStateFlow()
@@ -38,122 +35,179 @@ class MqttClientWrapper @Inject constructor(private val settingsRepository: Sett
     val messageFlow = _messageFlow.asSharedFlow()
 
     private val jsonParser = Json { ignoreUnknownKeys = true }
-
     private var client: Mqtt5AsyncClient? = null
     private var currentSettings: MqttSettings? = null
+    private val isManuallyDisconnected = AtomicBoolean(false)
+
     init {
-        scope.launch {
-            settingsRepository.mqttSettingsFlow.collectLatest { settings ->
+        settingsRepository.mqttSettingsFlow
+            .onEach { settings ->
                 Log.d(TAG, "New settings collected: $settings")
                 val oldSettings = currentSettings
                 currentSettings = settings
-                // 只有当 host, port, 或认证信息这些关键连接参数变化时才重连
                 if (settings.host != oldSettings?.host ||
                     settings.port != oldSettings.port ||
                     settings.username != oldSettings.username ||
                     settings.password != oldSettings.password
                 ) {
-                    disconnect()
+                    reconnect()
+                } else if (settings.topic != oldSettings?.topic && client?.state?.isConnected == true) {
+                    scope.launch { subscribeToTopic() }
+                }
+            }
+            .launchIn(scope)
+
+        startConnectionSupervisor()
+    }
+
+    private fun startConnectionSupervisor() {
+        scope.launch {
+            while (isActive) {
+                delay(30_000)
+                if (!isManuallyDisconnected.get() && client?.state?.isConnectedOrReconnect != true) {
+                    Log.w(TAG, "Connection supervisor: Detected disconnected state. Forcing reconnect...")
                     connect()
-                } else if (settings.topic != oldSettings.topic) {
-                    // 如果只是 topic 变了，则只需要重新订阅
-                    subscribeToTopic()
                 }
             }
         }
     }
 
-
-
     suspend fun connect() {
-        val settings = currentSettings ?: settingsRepository.mqttSettingsFlow.first()
-        currentSettings = settings
+        clientMutex.withLock {
+            if (isManuallyDisconnected.get()) {
+                Log.i(TAG, "Connection attempt ignored due to manual disconnection.")
+                return@withLock
+            }
+            if (client?.state?.isConnectedOrReconnect == true) {
+                Log.i(TAG, "Client is already connected or reconnecting.")
+                return@withLock
+            }
 
-        if (client?.state?.isConnectedOrReconnect == true) {
-            Log.i(TAG, "Client is already connected or reconnecting.")
-            return
+            val settings = currentSettings ?: settingsRepository.mqttSettingsFlow.first()
+            currentSettings = settings
+
+            try {
+                Log.i(TAG, "MQTT client building and connecting to ${settings.host}:${settings.port}...")
+
+                val localClient = MqttClient.builder()
+                    .useMqttVersion5()
+                    .identifier(UUID.randomUUID().toString())
+                    .serverHost(settings.host)
+                    .serverPort(settings.port)
+                    .addConnectedListener { onConnect() }
+                    .addDisconnectedListener { onDisconnect(it) }
+                    .buildAsync()
+
+                client = localClient
+
+                val connectBuilder = localClient.connectWith()
+
+                if (settings.username.isNotBlank()) {
+                    Log.i(TAG, "Connecting with username: ${settings.username}")
+                    connectBuilder
+                        .simpleAuth()
+                        .username(settings.username)
+                        .password(settings.password.toByteArray())
+                        .applySimpleAuth()
+                } else {
+                    Log.i(TAG, "Connecting anonymously.")
+                }
+
+                val connAck: Mqtt5ConnAck = connectBuilder.send().await()
+                Log.i(TAG, "MQTT connect acknowledged: $connAck")
+
+                if (connAck.reasonCode.isError) {
+                    throw RuntimeException("MQTT connection failed: ${connAck.reasonCode} - ${connAck.reasonString}")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Connection attempt failed.", e)
+                _connectionState.emit(MqttConnectionState.Error(e))
+            }
         }
+    }
 
-        Log.i(TAG, "MQTT client building and connecting to ${settings.host}:${settings.port}...")
+    fun reconnect() {
+        scope.launch {
+            Log.i(TAG, "Reconnect requested.")
+            isManuallyDisconnected.set(false)
+            disconnectInternal()
+            connect()
+        }
+    }
 
-        client = MqttClient.builder()
-            .useMqttVersion5()
-            .identifier(UUID.randomUUID().toString())
-            .serverHost(settings.host)
-            .serverPort(settings.port)
-            .addConnectedListener {
-                Log.i(TAG, "HiveMQ client connected!")
-                scope.launch {
-                    _connectionState.emit(MqttConnectionState.Connected)
-                    subscribeToTopic()
+    fun disconnect() {
+        scope.launch {
+            Log.i(TAG, "Manual disconnect requested.")
+            isManuallyDisconnected.set(true)
+            disconnectInternal()
+        }
+    }
+
+    private suspend fun disconnectInternal() {
+        clientMutex.withLock {
+            val localClient = client
+            if (localClient != null) {
+                Log.i(TAG, "Disconnecting internal client...")
+                try {
+                    localClient.disconnect().await()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error during disconnect", e)
                 }
             }
-            .addDisconnectedListener { context ->
-                val cause = context.cause
-                Log.w(TAG, "HiveMQ client disconnected!", cause)
-                scope.launch {
-                    _connectionState.emit(MqttConnectionState.Disconnected(cause))
-                }
-            }
-            .buildAsync()
-
-        // **↓↓↓ 核心修正点在这里 ↓↓↓**
-
-        // 1. 创建一个可修改的连接请求构建器
-        val connectBuilder = client!!.connectWith()
-
-        // 2. 如果用户名不为空，才配置认证信息
-        if (settings.username.isNotBlank()) {
-            Log.i(TAG, "Connecting with username: ${settings.username}")
-            connectBuilder
-                .simpleAuth()
-                .username(settings.username) // 在这里 username 不可能是 null
-                .password(settings.password.toByteArray()) // password 也不可能是 null
-                .applySimpleAuth()
-        } else {
-            Log.i(TAG, "Connecting anonymously.")
+            client = null
+            _connectionState.emit(MqttConnectionState.Disconnected(null))
         }
+    }
 
-        // 3. 发送最终构建好的连接请求
-        val connAck: Mqtt5ConnAck = connectBuilder.send().await()
-        Log.i(TAG, "MQTT connect acknowledged: $connAck")
+    private fun onConnect() {
+        Log.i(TAG, "HiveMQ client connected!")
+        scope.launch {
+            _connectionState.emit(MqttConnectionState.Connected)
+            subscribeToTopic()
+        }
+    }
 
-        if (connAck.reasonCode.isError) {
-            val error = RuntimeException("MQTT connection failed: ${connAck.reasonCode} - ${connAck.reasonString}")
-            Log.e(TAG, "Connection failure", error)
-            _connectionState.emit(MqttConnectionState.Error(error))
-            throw error
+    private fun onDisconnect(context: com.hivemq.client.mqtt.lifecycle.MqttClientDisconnectedContext) {
+        val cause = context.cause
+        Log.w(TAG, "HiveMQ client disconnected!", cause)
+        scope.launch {
+            _connectionState.emit(MqttConnectionState.Disconnected(cause))
         }
     }
 
     private suspend fun subscribeToTopic() {
-        val topic = currentSettings?.topic ?: return
-        client?.let {
-            Log.i(TAG, "Subscribing to topic: $topic")
-            it.subscribeWith()
-                .topicFilter(topic)
-                .callback { publish -> handleIncomingMessage(publish) }
-                .send()
-                .await()
-            Log.i(TAG, "Successfully subscribed to topic: $topic")
+        clientMutex.withLock {
+            val topic = currentSettings?.topic ?: return@withLock
+            val localClient = client ?: return@withLock
+
+            if (localClient.state.isConnected) {
+                try {
+                    Log.i(TAG, "Subscribing to topic: $topic")
+                    localClient.subscribeWith()
+                        .topicFilter(topic)
+                        .callback { publish -> handleIncomingMessage(publish) }
+                        .send()
+                        .await()
+                    Log.i(TAG, "Successfully subscribed to topic: $topic")
+                } catch (e: Exception) {
+                    Log.e(TAG, "Subscription failed", e)
+                }
+            } else {
+                Log.w(TAG, "Subscription skipped: client is not connected.")
+            }
         }
     }
 
     private fun handleIncomingMessage(publish: Mqtt5Publish) {
         val payload = StandardCharsets.UTF_8.decode(publish.payload.get()).toString()
-        Log.d(TAG, "HiveMQ raw message arrived. Topic: ${publish.topic}, Message: $payload") // 使用原生 Log
+        Log.d(TAG, "HiveMQ raw message arrived. Topic: ${publish.topic}, Message: $payload")
         scope.launch {
             try {
                 val parsedMessage = jsonParser.decodeFromString<CarActionMessage>(payload)
                 _messageFlow.emit(parsedMessage)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to parse HiveMQ message: $payload", e) // 使用原生 Log
+                Log.e(TAG, "Failed to parse HiveMQ message: $payload", e)
             }
         }
-    }
-
-    fun disconnect() {
-        client?.disconnect()
-        client = null // 确保客户端对象被清空
     }
 }
